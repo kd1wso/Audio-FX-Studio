@@ -1,0 +1,16 @@
+gradle.properties.txt
+
+*.log
+*.out
+*.err
+*.pid
+*.exit
+run-build.ps1
+
+*.iml
+.gradle/
+.idea/
+local.properties
+**/build/
+.DS_Store
+
