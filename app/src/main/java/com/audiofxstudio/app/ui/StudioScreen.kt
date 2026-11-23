@@ -12,17 +12,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 
 @Composable
 fun StudioScreen(vm: StudioViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION); vm.select(context, it) }
-    }
-    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri ->
-        uri?.let { target -> state.output?.inputStream()?.use { input -> context.contentResolver.openOutputStream(target)?.use(input::copyTo) } }
-    }
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION); vm.select(context, it) } }
     Surface(Modifier.fillMaxSize()) {
         if (state.uri == null) {
             Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
@@ -30,21 +26,21 @@ fun StudioScreen(vm: StudioViewModel) {
                 Spacer(Modifier.height(24.dp))
                 Button(onClick = { open.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Выбрать аудиофайл") }
             }
-        } else {
-            Editor(state, vm) { save.launch("audio.wav") }
-        }
+        } else Editor(state, vm, context)
     }
 }
 
 @Composable
-private fun Editor(state: StudioState, vm: StudioViewModel, onSave: () -> Unit) {
-    val context = LocalContext.current
+private fun Editor(state: StudioState, vm: StudioViewModel, context: android.content.Context) {
     var player by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
+    var playing by remember { mutableStateOf(false) }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri -> uri?.let { target -> state.output?.inputStream()?.use { input -> context.contentResolver.openOutputStream(target)?.use(input::copyTo) } } }
     DisposableEffect(state.uri) { player = vm.createPlayer(context); onDispose { player?.release() } }
+    LaunchedEffect(player) { while (true) { playing = player?.isPlaying == true; delay(200) } }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text(state.name, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(12.dp))
-        Button(onClick = { if (player?.isPlaying == true) player?.pause() else player?.play() }) { Text(if (player?.isPlaying == true) "Пауза" else "Воспроизвести") }
+        Button(onClick = { if (player?.isPlaying == true) player?.pause() else player?.play() }) { Text(if (playing) "Пауза" else "Воспроизвести") }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(state.effects) { effect ->
                 Card(Modifier.fillMaxWidth()) {
@@ -55,7 +51,9 @@ private fun Editor(state: StudioState, vm: StudioViewModel, onSave: () -> Unit) 
                 }
             }
         }
-        Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text(if (state.exporting) "Рендеринг..." else "Сохранить WAV") }
+        if (state.exporting) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Button(onClick = { vm.export(context, context.cacheDir.resolve("audio.wav")) }, enabled = !state.exporting, modifier = Modifier.fillMaxWidth()) { Text(if (state.exporting) "Рендеринг ${state.progress}%" else "Экспортировать WAV") }
+        if (state.output != null) OutlinedButton(onClick = { save.launch("audio-fx-result.wav") }, modifier = Modifier.fillMaxWidth()) { Text("Сохранить результат") }
     }
 }
 
