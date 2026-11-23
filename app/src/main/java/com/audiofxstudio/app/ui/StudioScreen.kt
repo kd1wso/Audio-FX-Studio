@@ -18,7 +18,9 @@ import kotlinx.coroutines.delay
 fun StudioScreen(vm: StudioViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION); vm.select(context, it) } }
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION); vm.select(context, it) }
+    }
     Surface(Modifier.fillMaxSize()) {
         if (state.uri == null) {
             Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
@@ -34,7 +36,9 @@ fun StudioScreen(vm: StudioViewModel) {
 private fun Editor(state: StudioState, vm: StudioViewModel, context: android.content.Context) {
     var player by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
     var playing by remember { mutableStateOf(false) }
-    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri -> uri?.let { target -> state.output?.inputStream()?.use { input -> context.contentResolver.openOutputStream(target)?.use(input::copyTo) } } }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(state.exportFormat.mime)) { uri ->
+        uri?.let { target -> state.output?.inputStream()?.use { input -> context.contentResolver.openOutputStream(target)?.use(input::copyTo) } }
+    }
     DisposableEffect(state.uri) { player = vm.createPlayer(context); onDispose { player?.release() } }
     LaunchedEffect(player) { while (true) { playing = player?.isPlaying == true; delay(200) } }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -45,15 +49,27 @@ private fun Editor(state: StudioState, vm: StudioViewModel, context: android.con
             items(state.effects) { effect ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(effect.type.title); Switch(effect.enabled, { vm.toggle(effect.type) }) }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(effect.type.title)
+                            Switch(effect.enabled, { vm.toggle(effect.type) })
+                        }
                         if (effect.enabled) Slider(effect.value, { vm.setValue(effect.type, it) })
                     }
                 }
             }
         }
+        Text("Формат экспорта", style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ExportFormat.entries.forEach { format ->
+                FilterChip(selected = state.exportFormat == format, onClick = { vm.setFormat(format) }, label = { Text(format.label) })
+            }
+        }
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (state.exporting) LinearProgressIndicator(Modifier.fillMaxWidth())
-        Button(onClick = { vm.export(context, context.cacheDir.resolve("audio.wav")) }, enabled = !state.exporting, modifier = Modifier.fillMaxWidth()) { Text(if (state.exporting) "Рендеринг ${state.progress}%" else "Экспортировать WAV") }
-        if (state.output != null) OutlinedButton(onClick = { save.launch("audio-fx-result.wav") }, modifier = Modifier.fillMaxWidth()) { Text("Сохранить результат") }
+        Button(onClick = { vm.export(context, context.cacheDir) }, enabled = !state.exporting, modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.exporting) "Рендеринг ${state.progress}%" else "Экспортировать ${state.exportFormat.label}")
+        }
+        state.output?.let { OutlinedButton(onClick = { save.launch("audio-fx-result.${state.exportFormat.extension}") }, modifier = Modifier.fillMaxWidth()) { Text("Сохранить результат") } }
     }
 }
 
